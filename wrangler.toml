@@ -1,0 +1,30 @@
+name = "backend-pizza"
+main = "dist/src/worker.js"
+compatibility_date = "2025-10-06"
+compatibility_flags = ["nodejs_compat"]
+
+# Routes para domínio custom (produção)
+[[routes]]
+pattern = "api.curiooso.com.br/*"
+zone_name = "curiooso.com.br"
+
+[vars]
+FRONTEND_URL = "https://m.curiooso.com.br"
+JWT_ISS = "backend-pizza"
+JWT_AUD = "pizzaria-spa"
+
+DATABASE_URL = "postgresql://neondb_owner:npg_R5NlAgDfoP9V@ep-lively-cloud-adeuc9hg-pooler.c-2.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+GOOGLE_MAPS_API_KEY = "AIzaSyD2ni3P2s3H2yelIe2oVIHo9HNX5tWxLLE"
+
+CLOUDINARY_API_KEY = "148869173549118"
+CLOUDINARY_API_SECRET = "DhqPiic23pInMNq__siydurNyN8"
+CLOUDINARY_CLOUD_NAME = "dv2jdrzv7"
+
+JWT_SECRET = "cc82e4c6a1c3f0288f7bdbbcb9a531b16521b23d81dca8937fdb9e2f6f4f26b8c89ab83d15caa0e4fd9c36e51466e9f15f977e902e3a6f4e2c3e981a81d91c1b"
+REFRESH_SECRET = "43d9a7a60b18b6a4a0fa95cda8cefe176ca32121eab79d41f83ec27a4d5a52d2cc9d3e105dc7b788c80129f3e72d13fbe635efac9b68db27b6f4b2f45f89a0b2"
+
+[triggers]
+crons = ["0 3 * * *"]
+
+[observability.logs]
+enabled = true

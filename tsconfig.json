@@ -1,0 +1,42 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "allowJs": true,
+    "strict": true,
+    "outDir": "dist",
+    "rootDir": ".",
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"],
+      "@shared/*": ["./shared/*"]
+    }
+  },
+  "include": [
+    "src/app.ts",
+    "src/auth.ts",
+    "src/worker.ts",
+    "shared/**/*"
+  ],
+  "exclude": [
+    "netlify",
+    "node_modules",
+    "dist",
+    "src/services",
+    "src/storage-old.ts",
+    "src/vite.ts",
+    "src/index.ts",
+    "src/index-express.ts",
+    "src/db.ts",
+    "src/migrations.ts",
+    "src/seeds.ts",
+    "src/scripts",
+    "src/lib"
+  ]
+}
