@@ -385,6 +385,12 @@ app.put('/api/admin/flavors/:id', async (c) => {
     const [updated] = await db.update(pizzaFlavors).set(data).where(eq(pizzaFlavors.id, id)).returning();
     return c.json({ success: true, flavor: updated });
 });
+app.delete('/api/admin/flavors/:id', async (c) => {
+    const db = c.get('db');
+    const id = c.req.param('id');
+    await db.delete(pizzaFlavors).where(eq(pizzaFlavors.id, id));
+    return c.json({ success: true, message: 'Sabor excluído com sucesso' });
+});
 app.get('/api/admin/extras', async (c) => {
     const db = c.get('db');
     const allExtras = await db.select().from(extras);
@@ -402,6 +408,12 @@ app.put('/api/admin/extras/:id', async (c) => {
     const data = await c.req.json();
     const [updated] = await db.update(extras).set(data).where(eq(extras.id, id)).returning();
     return c.json({ success: true, extra: updated });
+});
+app.delete('/api/admin/extras/:id', async (c) => {
+    const db = c.get('db');
+    const id = c.req.param('id');
+    await db.delete(extras).where(eq(extras.id, id));
+    return c.json({ success: true, message: 'Extra excluído com sucesso' });
 });
 app.get('/api/admin/dough-types', async (c) => {
     const db = c.get('db');
@@ -421,12 +433,51 @@ app.put('/api/admin/dough-types/:id', async (c) => {
     const [updated] = await db.update(doughTypes).set(data).where(eq(doughTypes.id, id)).returning();
     return c.json({ success: true, doughType: updated });
 });
+app.delete('/api/admin/dough-types/:id', async (c) => {
+    const db = c.get('db');
+    const id = c.req.param('id');
+    await db.delete(doughTypes).where(eq(doughTypes.id, id));
+    return c.json({ success: true, message: 'Tipo de massa excluído com sucesso' });
+});
 app.get('/api/admin/settings', async (c) => {
     const db = c.get('db');
     const settings = await db.select().from(pizzeriaSettings);
     const settingsObj = {};
-    settings.forEach((s) => settingsObj[s.section] = s.data);
+    settings.forEach((s) => {
+        // Map business_hours -> businessHours for frontend compatibility
+        const key = s.section === 'business_hours' ? 'businessHours' : s.section;
+        settingsObj[key] = s.data;
+    });
     return c.json(settingsObj);
+});
+app.put('/api/admin/settings', async (c) => {
+    const db = c.get('db');
+    const { section, data } = await c.req.json();
+    if (!section || !data) {
+        return c.json({ error: 'section e data são obrigatórios' }, 400);
+    }
+    // Map frontend section names to database section names
+    const sectionMapping = {
+        'hours': 'business_hours',
+        'businessHours': 'business_hours'
+    };
+    const dbSection = sectionMapping[section] || section;
+    // Check if section exists
+    const existing = await db.select().from(pizzeriaSettings).where(eq(pizzeriaSettings.section, dbSection));
+    if (existing.length > 0) {
+        // Update existing section
+        await db.update(pizzeriaSettings)
+            .set({ data: data, updatedAt: new Date() })
+            .where(eq(pizzeriaSettings.section, dbSection));
+    }
+    else {
+        // Insert new section (for 'social' and other new sections)
+        await db.insert(pizzeriaSettings).values({
+            section: dbSection,
+            data: data
+        });
+    }
+    return c.json({ success: true, message: 'Configurações atualizadas' });
 });
 app.post('/api/admin/bulk-import-flavors', async (c) => {
     const db = c.get('db');
@@ -445,6 +496,35 @@ app.post('/api/admin/bulk-import-dough-types', async (c) => {
     const { doughTypes: doughTypesData } = await c.req.json();
     await db.insert(doughTypes).values(doughTypesData);
     return c.json({ success: true, count: doughTypesData.length });
+});
+app.put('/api/admin/update-credentials', async (c) => {
+    const db = c.get('db');
+    const userId = c.get('userId');
+    const { currentPassword, newUsername, newPassword } = await c.req.json();
+    if (!userId) {
+        return c.json({ error: 'Não autenticado' }, 401);
+    }
+    // Get current admin user
+    const [currentAdmin] = await db.select().from(adminUsers).where(eq(adminUsers.id, userId)).limit(1);
+    if (!currentAdmin) {
+        return c.json({ error: 'Usuário não encontrado' }, 404);
+    }
+    // Verify current password using pgcrypto
+    const passwordValid = await verifyPasswordPgcrypto(db, currentAdmin.username, currentPassword);
+    if (!passwordValid) {
+        return c.json({ error: 'Senha atual incorreta' }, 401);
+    }
+    // Hash new password using pgcrypto
+    const newPasswordHash = await hashPasswordPgcrypto(db, newPassword, 10);
+    // Update credentials
+    await db.update(adminUsers)
+        .set({
+        username: newUsername,
+        passwordHash: newPasswordHash,
+        updatedAt: new Date()
+    })
+        .where(eq(adminUsers.id, userId));
+    return c.json({ success: true, message: 'Credenciais atualizadas com sucesso' });
 });
 app.post('/api/orders/image', async (c) => {
     const { dataUrl } = await c.req.json();

@@ -572,8 +572,12 @@ app.post('/api/admin/bulk-import-dough-types', async (c) => {
 
 app.put('/api/admin/update-credentials', async (c) => {
   const db = c.get('db')
-  const userId = c.get('userId')
+  const userId = c.get('userId') as string
   const { currentPassword, newUsername, newPassword } = await c.req.json()
+  
+  if (!userId) {
+    return c.json({ error: 'Não autenticado' }, 401)
+  }
   
   // Get current admin user
   const [currentAdmin] = await db.select().from(adminUsers).where(eq(adminUsers.id, userId)).limit(1)
