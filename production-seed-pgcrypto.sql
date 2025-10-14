@@ -106,20 +106,31 @@ INSERT INTO pizzeria_settings (id, section, data) VALUES
   "facebook": "bellamassapizzaria"
 }'),
 ('s0000000-0000-0000-0000-000000000003', 'business_hours', '{
-  "monday": "Fechado",
-  "tuesday": "18:00 - 23:00",
-  "wednesday": "18:00 - 23:00",
-  "thursday": "18:00 - 23:00",
-  "friday": "18:00 - 00:00",
-  "saturday": "18:00 - 00:00",
-  "sunday": "18:00 - 23:00"
+  "Segunda-feira": "Fechado",
+  "Terça-feira": "18:00 - 23:00",
+  "Quarta-feira": "18:00 - 23:00",
+  "Quinta-feira": "18:00 - 23:00",
+  "Sexta-feira": "18:00 - 00:00",
+  "Sábado": "18:00 - 00:00",
+  "Domingo": "18:00 - 23:00"
 }'),
 ('s0000000-0000-0000-0000-000000000004', 'delivery', '{
-  "enabled": true,
-  "freeDeliveryMinimum": "60.00",
-  "deliveryFee": "8.00",
-  "estimatedTime": "40-60 minutos",
-  "maxDistance": 10
+  "baseFee": 5.00,
+  "feePerRange": 2.50,
+  "kmRange": 3,
+  "baseTime": 45
+}'),
+('s0000000-0000-0000-0000-000000000007', 'address', '{
+  "street": "Rua das Pizzas",
+  "number": "123",
+  "neighborhood": "Centro",
+  "city": "São Paulo",
+  "state": "SP",
+  "cep": "01234-567",
+  "coordinates": {
+    "lat": -23.5505,
+    "lng": -46.6333
+  }
 }'),
 ('s0000000-0000-0000-0000-000000000005', 'payment_methods', '{
   "cash": true,
