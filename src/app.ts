@@ -6,6 +6,8 @@ import { eq, and, isNull, gt, sql, desc, count } from 'drizzle-orm'
 import { sessions, adminUsers, pizzaFlavors, extras, doughTypes, orders, pizzeriaSettings, cepCache } from '../shared/schema'
 import { type Env, signAccessToken, verifyAccessToken, genRefreshPair, sha256Hex, setRefreshCookie, clearRefreshCookie, setCsrfCookie, REFRESH_TTL_SEC } from './auth'
 import { verifyPasswordPgcrypto, hashPasswordPgcrypto } from './auth-pgcrypto'
+import { PIZZERIA_ADDRESS, DELIVERY_CONFIG, CEP_COORDINATES } from '../shared/constants'
+import { getCoordinatesFromAddress, calculateRoute } from './lib/google-maps'
 
 type Vars = { db: any, userId?: string, username?: string, role?: string }
 
@@ -102,19 +104,64 @@ function parseCookies(header = '') {
   return out
 }
 
-function calculateHaversineDistance(coord1: {lat: number, lng: number}, coord2: {lat: number, lng: number}): number {
-  const R = 6371
-  const dLat = (coord2.lat - coord1.lat) * Math.PI / 180
-  const dLon = (coord2.lng - coord1.lng) * Math.PI / 180
-  const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-    Math.cos(coord1.lat * Math.PI / 180) * Math.cos(coord2.lat * Math.PI / 180) *
-    Math.sin(dLon/2) * Math.sin(dLon/2)
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))
-  return R * c
+// Helper function to get coordinates using Google Geocoding API (required)
+// Returns coordinates on success, null for invalid address, throws for service errors
+async function getCoordinatesForCEP(
+  cep: string, 
+  address: any, 
+  db: any, 
+  apiKey: string
+): Promise<{lat: number, lng: number} | null> {
+  const cleanCEP = cep.replace(/\D/g, '')
+  
+  console.log(`🔍 [GEOCODE] Buscando coordenadas para CEP: ${cleanCEP}`)
+  
+  const fullAddress = `${address.street}, ${address.neighborhood}, ${address.city} - ${address.state}, ${cleanCEP}, Brasil`
+  const geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(fullAddress)}&key=${apiKey}`
+  
+  const response = await fetch(geocodeUrl) // Let exception propagate for network errors
+  const data = await response.json()
+  
+  if (data.status === 'OK' && data.results[0]) {
+    const coords = {
+      lat: data.results[0].geometry.location.lat,
+      lng: data.results[0].geometry.location.lng
+    }
+    
+    // Save to cache for future use (optional optimization)
+    try {
+      await db.insert(cepCache).values({
+        cep: cleanCEP,
+        latitude: coords.lat,
+        longitude: coords.lng,
+        address: fullAddress
+      }).onConflictDoUpdate({
+        target: cepCache.cep,
+        set: {
+          latitude: coords.lat,
+          longitude: coords.lng,
+          address: fullAddress,
+          updatedAt: new Date()
+        }
+      })
+      console.log(`✅ [GEOCODE] Coordenadas obtidas e salvas: ${coords.lat}, ${coords.lng}`)
+    } catch (e) {
+      console.warn(`⚠️ [GEOCODE] Coordenadas obtidas mas erro ao salvar cache`)
+    }
+    
+    return coords
+  }
+  
+  // Client error (invalid address/request) - return null for 400 response
+  if (data.status === 'ZERO_RESULTS' || data.status === 'INVALID_REQUEST') {
+    console.error(`❌ [GEOCODE] Endereço inválido (status: ${data.status})`)
+    return null
+  }
+  
+  // Service error (API key denied, quota exceeded, unknown error) - throw for 503 response
+  console.error(`❌ [GEOCODE] Erro de serviço Google (status: ${data.status})`)
+  throw new Error(`Google Geocoding service error: ${data.status}`)
 }
-
-const PIZZERIA_ADDRESS = { coordinates: { lat: -23.5236, lng: -46.7031 } }
-const DELIVERY_CONFIG = { baseFee: 9.00, feePerRange: 9.00, kmRange: 3, baseTime: 20 }
 
 app.get('/api/flavors', async (c) => {
   const db = c.get('db')
@@ -163,21 +210,73 @@ app.get('/api/dough-types', async (c) => {
 })
 
 app.post('/api/calculate-distance', async (c) => {
+  const db = c.get('db')
   const { cep, address } = await c.req.json()
   
-  const cleanCEP = cep.replace(/\D/g, '')
-  const destinationCoords = { lat: -23.5505, lng: -46.6333 }
+  console.log(`📍 [DELIVERY] Calculando entrega para CEP: ${cep}`)
   
-  const distance = calculateHaversineDistance(PIZZERIA_ADDRESS.coordinates, destinationCoords)
-  const roundedDistance = Math.max(1, Math.round(distance * 10) / 10)
-  const ranges = Math.ceil(roundedDistance / DELIVERY_CONFIG.kmRange)
+  // Check if API key is available
+  if (!c.env.GOOGLE_MAPS_API_KEY) {
+    console.error(`❌ [DELIVERY] GOOGLE_MAPS_API_KEY não configurada`)
+    return c.json({ 
+      error: 'Serviço de cálculo de entrega temporariamente indisponível' 
+    }, 503)
+  }
+  
+  // Get coordinates for customer's CEP (Google Geocoding required)
+  let destinationCoords: {lat: number, lng: number} | null = null
+  
+  try {
+    destinationCoords = await getCoordinatesForCEP(
+      cep, 
+      address, 
+      db, 
+      c.env.GOOGLE_MAPS_API_KEY
+    )
+  } catch (error) {
+    console.error(`❌ [DELIVERY] Erro de rede/serviço no Geocoding:`, error)
+    return c.json({ 
+      error: 'Serviço de cálculo de entrega temporariamente indisponível' 
+    }, 503)
+  }
+  
+  if (!destinationCoords) {
+    console.error(`❌ [DELIVERY] Endereço inválido - geocoding retornou ZERO_RESULTS`)
+    return c.json({ 
+      error: 'Não foi possível localizar o endereço informado. Verifique os dados e tente novamente.' 
+    }, 400)
+  }
+  
+  // Calculate REAL road distance using Google Maps Routes API (required)
+  const route = await calculateRoute(
+    PIZZERIA_ADDRESS.coordinates,
+    destinationCoords,
+    c.env.GOOGLE_MAPS_API_KEY
+  )
+  
+  if (!route) {
+    console.error(`❌ [DELIVERY] Routes API falhou - cálculo de entrega não disponível`)
+    return c.json({ 
+      error: 'Não foi possível calcular a taxa de entrega. Tente novamente mais tarde.' 
+    }, 503)
+  }
+  
+  const distance = route.distanceKm;
+  const estimatedMinutes = route.durationMinutes;
+  
+  console.log(`✅ [DELIVERY-ROUTES-API] Distância real (ruas): ${distance}km | Tempo real: ${estimatedMinutes} min`)
+  
+  // Calculate delivery fee based on distance ranges
+  const ranges = Math.ceil(distance / DELIVERY_CONFIG.kmRange)
   const deliveryFee = Math.max(ranges * DELIVERY_CONFIG.feePerRange, DELIVERY_CONFIG.baseFee)
-  const estimatedMinutes = Math.max(DELIVERY_CONFIG.baseTime, DELIVERY_CONFIG.baseTime + (roundedDistance * 1.5))
+  
+  console.log(`💰 [DELIVERY] Taxa final: R$ ${deliveryFee.toFixed(2)} (${ranges} faixas de ${DELIVERY_CONFIG.kmRange}km)`)
   
   return c.json({
-    distance: roundedDistance,
+    distance,
     deliveryFee: deliveryFee.toFixed(2),
-    estimatedTime: `${Math.round(estimatedMinutes)} min`
+    estimatedTime: `${Math.round(estimatedMinutes)} min`,
+    method: 'routes_api'
   })
 })
 
