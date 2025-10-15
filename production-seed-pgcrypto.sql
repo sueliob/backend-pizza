@@ -38,12 +38,12 @@ INSERT INTO pizza_flavors (id, name, description, prices, category, image_url, a
 ('b0000000-0000-0000-0000-000000000006', 'Nutella com Morango', 'Nutella cremosa com morangos frescos', '{"media": "42.00", "individual": "28.00"}', 'doces', 'https://images.unsplash.com/photo-1549903072-7e6e0bedb501', true),
 
 -- Entradas (2)
-('c0000000-0000-0000-0000-000000000001', 'Bruschetta', 'Pão italiano com tomate, manjericão e azeite', '{"individual": "18.00"}', 'entradas', 'https://images.unsplash.com/photo-1572695157366-5e585ab2b69f', true),
-('c0000000-0000-0000-0000-000000000002', 'Palitos de Alho', 'Palitos de massa com queijo e molho de alho', '{"individual": "22.00"}', 'entradas', 'https://images.unsplash.com/photo-1619221882018-aa9f0e0c6dd9', true),
+('c0000000-0000-0000-0000-000000000001', 'Bruschetta', 'Pão italiano com tomate, manjericão e azeite', '{"unico": "18.00"}', 'entradas', 'https://images.unsplash.com/photo-1572695157366-5e585ab2b69f', true),
+('c0000000-0000-0000-0000-000000000002', 'Palitos de Alho', 'Palitos de massa com queijo e molho de alho', '{"unico": "22.00"}', 'entradas', 'https://images.unsplash.com/photo-1619221882018-aa9f0e0c6dd9', true),
 
 -- Bebidas (2)
-('d0000000-0000-0000-0000-000000000001', 'Refrigerante 2L', 'Coca-Cola, Guaraná ou Fanta', '{"individual": "12.00"}', 'bebidas', 'https://images.unsplash.com/photo-1581006852262-e4307cf6283a', true),
-('d0000000-0000-0000-0000-000000000002', 'Suco Natural 1L', 'Laranja, limão ou abacaxi', '{"individual": "15.00"}', 'bebidas', 'https://images.unsplash.com/photo-1600271886742-f049cd451bba', true)
+('d0000000-0000-0000-0000-000000000001', 'Refrigerante 2L', 'Coca-Cola, Guaraná ou Fanta', '{"unico": "12.00"}', 'bebidas', 'https://images.unsplash.com/photo-1581006852262-e4307cf6283a', true),
+('d0000000-0000-0000-0000-000000000002', 'Suco Natural 1L', 'Laranja, limão ou abacaxi', '{"unico": "15.00"}', 'bebidas', 'https://images.unsplash.com/photo-1600271886742-f049cd451bba', true)
 ON CONFLICT (id) DO NOTHING;
 
 -- ==============================================
