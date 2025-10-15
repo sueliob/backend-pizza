@@ -221,6 +221,26 @@ app.get('/api/public/settings', async (c) => {
   }
 })
 
+app.get('/api/public/category-stats', async (c) => {
+  const db = c.get('db')
+  try {
+    const allFlavors = await db.select().from(pizzaFlavors)
+      .where(eq(pizzaFlavors.available, true))
+    
+    const stats = {
+      entradas: allFlavors.filter((f: any) => f.category === 'entradas').length,
+      salgadas: allFlavors.filter((f: any) => f.category === 'salgadas').length,
+      doces: allFlavors.filter((f: any) => f.category === 'doces').length,
+      bebidas: allFlavors.filter((f: any) => f.category === 'bebidas').length,
+    }
+    
+    return c.json(stats)
+  } catch (error) {
+    console.error('Error fetching category stats:', error)
+    return c.json({ entradas: 0, salgadas: 0, doces: 0, bebidas: 0 }, 200)
+  }
+})
+
 app.get('/api/public/contact', async (c) => {
   const db = c.get('db')
   try {
