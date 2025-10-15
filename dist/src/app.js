@@ -3,9 +3,11 @@ import { cors } from 'hono/cors';
 import { drizzle } from 'drizzle-orm/neon-http';
 import { neon } from '@neondatabase/serverless';
 import { eq, and, isNull, gt, sql, desc, count } from 'drizzle-orm';
-import { sessions, adminUsers, pizzaFlavors, extras, doughTypes, orders, pizzeriaSettings } from '../shared/schema';
+import { sessions, adminUsers, pizzaFlavors, extras, doughTypes, orders, pizzeriaSettings, cepCache } from '../shared/schema';
 import { signAccessToken, verifyAccessToken, genRefreshPair, sha256Hex, setRefreshCookie, clearRefreshCookie, setCsrfCookie, REFRESH_TTL_SEC } from './auth';
 import { verifyPasswordPgcrypto, hashPasswordPgcrypto } from './auth-pgcrypto';
+import { PIZZERIA_ADDRESS, DELIVERY_CONFIG } from '../shared/constants';
+import { calculateRoute } from './lib/google-maps';
 const app = new Hono();
 // ✅ Validação de host (bloqueia acessos fora do domínio custom)
 app.use('*', async (c, next) => {
@@ -87,18 +89,52 @@ function parseCookies(header = '') {
     });
     return out;
 }
-function calculateHaversineDistance(coord1, coord2) {
-    const R = 6371;
-    const dLat = (coord2.lat - coord1.lat) * Math.PI / 180;
-    const dLon = (coord2.lng - coord1.lng) * Math.PI / 180;
-    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-        Math.cos(coord1.lat * Math.PI / 180) * Math.cos(coord2.lat * Math.PI / 180) *
-            Math.sin(dLon / 2) * Math.sin(dLon / 2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    return R * c;
+// Helper function to get coordinates using Google Geocoding API (required)
+// Returns coordinates on success, null for invalid address, throws for service errors
+async function getCoordinatesForCEP(cep, address, db, apiKey) {
+    const cleanCEP = cep.replace(/\D/g, '');
+    console.log(`🔍 [GEOCODE] Buscando coordenadas para CEP: ${cleanCEP}`);
+    const fullAddress = `${address.street}, ${address.neighborhood}, ${address.city} - ${address.state}, ${cleanCEP}, Brasil`;
+    const geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(fullAddress)}&key=${apiKey}`;
+    const response = await fetch(geocodeUrl); // Let exception propagate for network errors
+    const data = await response.json();
+    if (data.status === 'OK' && data.results[0]) {
+        const coords = {
+            lat: data.results[0].geometry.location.lat,
+            lng: data.results[0].geometry.location.lng
+        };
+        // Save to cache for future use (optional optimization)
+        try {
+            await db.insert(cepCache).values({
+                cep: cleanCEP,
+                latitude: coords.lat,
+                longitude: coords.lng,
+                address: fullAddress
+            }).onConflictDoUpdate({
+                target: cepCache.cep,
+                set: {
+                    latitude: coords.lat,
+                    longitude: coords.lng,
+                    address: fullAddress,
+                    updatedAt: new Date()
+                }
+            });
+            console.log(`✅ [GEOCODE] Coordenadas obtidas e salvas: ${coords.lat}, ${coords.lng}`);
+        }
+        catch (e) {
+            console.warn(`⚠️ [GEOCODE] Coordenadas obtidas mas erro ao salvar cache`);
+        }
+        return coords;
+    }
+    // Client error (invalid address/request) - return null for 400 response
+    if (data.status === 'ZERO_RESULTS' || data.status === 'INVALID_REQUEST') {
+        console.error(`❌ [GEOCODE] Endereço inválido (status: ${data.status})`);
+        return null;
+    }
+    // Service error (API key denied, quota exceeded, unknown error) - throw for 503 response
+    console.error(`❌ [GEOCODE] Erro de serviço Google (status: ${data.status})`);
+    throw new Error(`Google Geocoding service error: ${data.status}`);
 }
-const PIZZERIA_ADDRESS = { coordinates: { lat: -23.5236, lng: -46.7031 } };
-const DELIVERY_CONFIG = { baseFee: 9.00, feePerRange: 9.00, kmRange: 3, baseTime: 20 };
 app.get('/api/flavors', async (c) => {
     const db = c.get('db');
     try {
@@ -146,18 +182,76 @@ app.get('/api/dough-types', async (c) => {
     }
 });
 app.post('/api/calculate-distance', async (c) => {
+    const db = c.get('db');
     const { cep, address } = await c.req.json();
-    const cleanCEP = cep.replace(/\D/g, '');
-    const destinationCoords = { lat: -23.5505, lng: -46.6333 };
-    const distance = calculateHaversineDistance(PIZZERIA_ADDRESS.coordinates, destinationCoords);
-    const roundedDistance = Math.max(1, Math.round(distance * 10) / 10);
-    const ranges = Math.ceil(roundedDistance / DELIVERY_CONFIG.kmRange);
-    const deliveryFee = Math.max(ranges * DELIVERY_CONFIG.feePerRange, DELIVERY_CONFIG.baseFee);
-    const estimatedMinutes = Math.max(DELIVERY_CONFIG.baseTime, DELIVERY_CONFIG.baseTime + (roundedDistance * 1.5));
+    console.log(`📍 [DELIVERY] Calculando entrega para CEP: ${cep}`);
+    // Check if API key is available
+    if (!c.env.GOOGLE_MAPS_API_KEY) {
+        console.error(`❌ [DELIVERY] GOOGLE_MAPS_API_KEY não configurada`);
+        return c.json({
+            error: 'Serviço de cálculo de entrega temporariamente indisponível'
+        }, 503);
+    }
+    // Get coordinates for customer's CEP (Google Geocoding required)
+    let destinationCoords = null;
+    try {
+        destinationCoords = await getCoordinatesForCEP(cep, address, db, c.env.GOOGLE_MAPS_API_KEY);
+    }
+    catch (error) {
+        console.error(`❌ [DELIVERY] Erro de rede/serviço no Geocoding:`, error);
+        return c.json({
+            error: 'Serviço de cálculo de entrega temporariamente indisponível'
+        }, 503);
+    }
+    if (!destinationCoords) {
+        console.error(`❌ [DELIVERY] Endereço inválido - geocoding retornou ZERO_RESULTS`);
+        return c.json({
+            error: 'Não foi possível localizar o endereço informado. Verifique os dados e tente novamente.'
+        }, 400);
+    }
+    // Calculate REAL road distance using Google Maps Routes API (required)
+    const route = await calculateRoute(PIZZERIA_ADDRESS.coordinates, destinationCoords, c.env.GOOGLE_MAPS_API_KEY);
+    if (!route) {
+        console.error(`❌ [DELIVERY] Routes API falhou - cálculo de entrega não disponível`);
+        return c.json({
+            error: 'Não foi possível calcular a taxa de entrega. Tente novamente mais tarde.'
+        }, 503);
+    }
+    const distance = route.distanceKm;
+    const estimatedMinutes = route.durationMinutes;
+    console.log(`✅ [DELIVERY-ROUTES-API] Distância real (ruas): ${distance}km | Tempo real: ${estimatedMinutes} min`);
+    // Get delivery config from database
+    let deliveryConfig = {
+        baseFee: DELIVERY_CONFIG.baseFee,
+        feePerRange: DELIVERY_CONFIG.feePerRange,
+        kmRange: DELIVERY_CONFIG.kmRange,
+        baseTime: DELIVERY_CONFIG.baseTime
+    };
+    try {
+        const settings = await db.select().from(pizzeriaSettings).where(eq(pizzeriaSettings.section, 'delivery'));
+        if (settings.length > 0 && settings[0].data) {
+            const dbConfig = settings[0].data;
+            deliveryConfig = {
+                baseFee: dbConfig.baseFee || DELIVERY_CONFIG.baseFee,
+                feePerRange: dbConfig.feePerRange || DELIVERY_CONFIG.feePerRange,
+                kmRange: dbConfig.kmRange || DELIVERY_CONFIG.kmRange,
+                baseTime: dbConfig.baseTime || DELIVERY_CONFIG.baseTime
+            };
+            console.log(`📋 [DELIVERY] Usando config do banco: Base R$ ${deliveryConfig.baseFee} | Por faixa R$ ${deliveryConfig.feePerRange} | Faixa ${deliveryConfig.kmRange}km`);
+        }
+    }
+    catch (error) {
+        console.warn(`⚠️ [DELIVERY] Erro ao buscar config do banco, usando valores padrão`);
+    }
+    // Calculate delivery fee based on distance ranges
+    const ranges = Math.ceil(distance / deliveryConfig.kmRange);
+    const deliveryFee = Math.max(ranges * deliveryConfig.feePerRange, deliveryConfig.baseFee);
+    console.log(`💰 [DELIVERY] Taxa final: R$ ${deliveryFee.toFixed(2)} (${ranges} faixas de ${deliveryConfig.kmRange}km)`);
     return c.json({
-        distance: roundedDistance,
+        distance,
         deliveryFee: deliveryFee.toFixed(2),
-        estimatedTime: `${Math.round(estimatedMinutes)} min`
+        estimatedTime: `${Math.round(estimatedMinutes)} min`,
+        method: 'routes_api'
     });
 });
 app.post('/api/orders', async (c) => {
@@ -190,12 +284,53 @@ app.get('/api/public/settings', async (c) => {
         const settings = await db.select().from(pizzeriaSettings);
         const settingsObj = {};
         settings.forEach((s) => {
-            settingsObj[s.section] = s.data;
+            // Map business_hours -> businessHours for frontend compatibility
+            const key = s.section === 'business_hours' ? 'businessHours' : s.section;
+            settingsObj[key] = s.data;
         });
+        // Add default UI config if not present
+        if (!settingsObj.ui_config) {
+            settingsObj.ui_config = {
+                texts: {
+                    menuTitle: "Menu",
+                    categoriesTitle: "Categorias",
+                    categories: {
+                        entradas: "ENTRADAS",
+                        salgadas: "PIZZAS SALGADAS",
+                        doces: "PIZZAS DOCES",
+                        bebidas: "BEBIDAS"
+                    }
+                },
+                colors: {
+                    entradas: "orange-500",
+                    salgadas: "primary",
+                    doces: "accent",
+                    bebidas: "blue-500"
+                }
+            };
+        }
         return c.json(settingsObj);
     }
     catch (error) {
         return c.json({}, 200);
+    }
+});
+app.get('/api/public/category-stats', async (c) => {
+    const db = c.get('db');
+    try {
+        const allFlavors = await db.select().from(pizzaFlavors)
+            .where(eq(pizzaFlavors.available, true));
+        const stats = {
+            entradas: allFlavors.filter((f) => f.category === 'entradas').length,
+            salgadas: allFlavors.filter((f) => f.category === 'salgadas').length,
+            doces: allFlavors.filter((f) => f.category === 'doces').length,
+            bebidas: allFlavors.filter((f) => f.category === 'bebidas').length,
+        };
+        return c.json(stats);
+    }
+    catch (error) {
+        console.error('Error fetching category stats:', error);
+        return c.json({ entradas: 0, salgadas: 0, doces: 0, bebidas: 0 }, 200);
     }
 });
 app.get('/api/public/contact', async (c) => {
@@ -462,22 +597,53 @@ app.put('/api/admin/settings', async (c) => {
         'businessHours': 'business_hours'
     };
     const dbSection = sectionMapping[section] || section;
+    let finalData = data;
+    // 🗺️ Geocodificação automática para endereços
+    if (dbSection === 'address') {
+        const address = `${data.street}, ${data.number}, ${data.neighborhood}, ${data.city} - ${data.state}, ${data.cep}, Brasil`;
+        const apiKey = c.env.GOOGLE_MAPS_API_KEY;
+        if (apiKey) {
+            try {
+                const geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${apiKey}`;
+                const geocodeResponse = await fetch(geocodeUrl);
+                const geocodeData = await geocodeResponse.json();
+                if (geocodeData.status === 'OK' && geocodeData.results[0]) {
+                    const location = geocodeData.results[0].geometry.location;
+                    finalData = {
+                        ...data,
+                        coordinates: {
+                            lat: location.lat,
+                            lng: location.lng
+                        }
+                    };
+                    console.log(`✅ Geocodificação bem-sucedida: ${location.lat}, ${location.lng}`);
+                }
+                else {
+                    console.warn(`⚠️ Geocodificação falhou (status: ${geocodeData.status}), mantendo coordenadas antigas`);
+                }
+            }
+            catch (error) {
+                console.error('❌ Erro na geocodificação:', error);
+                // Continua sem coordenadas atualizadas em caso de erro
+            }
+        }
+    }
     // Check if section exists
     const existing = await db.select().from(pizzeriaSettings).where(eq(pizzeriaSettings.section, dbSection));
     if (existing.length > 0) {
         // Update existing section
         await db.update(pizzeriaSettings)
-            .set({ data: data, updatedAt: new Date() })
+            .set({ data: finalData, updatedAt: new Date() })
             .where(eq(pizzeriaSettings.section, dbSection));
     }
     else {
         // Insert new section (for 'social' and other new sections)
         await db.insert(pizzeriaSettings).values({
             section: dbSection,
-            data: data
+            data: finalData
         });
     }
-    return c.json({ success: true, message: 'Configurações atualizadas' });
+    return c.json({ success: true, message: 'Configurações atualizadas', coordinates: finalData.coordinates || null });
 });
 app.post('/api/admin/bulk-import-flavors', async (c) => {
     const db = c.get('db');
