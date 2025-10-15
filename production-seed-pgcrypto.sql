@@ -101,7 +101,6 @@ INSERT INTO pizzeria_settings (id, section, data) VALUES
   "phone": "(11) 98765-4321",
   "whatsapp": "5511987654321",
   "email": "contato@bellamassa.com.br",
-  "address": "Rua das Pizzas, 123 - Centro",
   "instagram": "@bellamassa",
   "facebook": "bellamassapizzaria"
 }'),
