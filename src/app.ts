@@ -266,11 +266,35 @@ app.post('/api/calculate-distance', async (c) => {
   
   console.log(`✅ [DELIVERY-ROUTES-API] Distância real (ruas): ${distance}km | Tempo real: ${estimatedMinutes} min`)
   
-  // Calculate delivery fee based on distance ranges
-  const ranges = Math.ceil(distance / DELIVERY_CONFIG.kmRange)
-  const deliveryFee = Math.max(ranges * DELIVERY_CONFIG.feePerRange, DELIVERY_CONFIG.baseFee)
+  // Get delivery config from database
+  let deliveryConfig = {
+    baseFee: DELIVERY_CONFIG.baseFee,
+    feePerRange: DELIVERY_CONFIG.feePerRange,
+    kmRange: DELIVERY_CONFIG.kmRange,
+    baseTime: DELIVERY_CONFIG.baseTime
+  }
   
-  console.log(`💰 [DELIVERY] Taxa final: R$ ${deliveryFee.toFixed(2)} (${ranges} faixas de ${DELIVERY_CONFIG.kmRange}km)`)
+  try {
+    const settings = await db.select().from(pizzeriaSettings).where(eq(pizzeriaSettings.section, 'delivery'))
+    if (settings.length > 0 && settings[0].data) {
+      const dbConfig = settings[0].data as any
+      deliveryConfig = {
+        baseFee: dbConfig.baseFee || DELIVERY_CONFIG.baseFee,
+        feePerRange: dbConfig.feePerRange || DELIVERY_CONFIG.feePerRange,
+        kmRange: dbConfig.kmRange || DELIVERY_CONFIG.kmRange,
+        baseTime: dbConfig.baseTime || DELIVERY_CONFIG.baseTime
+      }
+      console.log(`📋 [DELIVERY] Usando config do banco: Base R$ ${deliveryConfig.baseFee} | Por faixa R$ ${deliveryConfig.feePerRange} | Faixa ${deliveryConfig.kmRange}km`)
+    }
+  } catch (error) {
+    console.warn(`⚠️ [DELIVERY] Erro ao buscar config do banco, usando valores padrão`)
+  }
+  
+  // Calculate delivery fee based on distance ranges
+  const ranges = Math.ceil(distance / deliveryConfig.kmRange)
+  const deliveryFee = Math.max(ranges * deliveryConfig.feePerRange, deliveryConfig.baseFee)
+  
+  console.log(`💰 [DELIVERY] Taxa final: R$ ${deliveryFee.toFixed(2)} (${ranges} faixas de ${deliveryConfig.kmRange}km)`)
   
   return c.json({
     distance,
