@@ -163,6 +163,28 @@ INSERT INTO pizzeria_settings (id, section, data) VALUES
     "icon": "drink",
     "order": 4
   }
+}'),
+('s0000000-0000-0000-0000-000000000008', 'ui_config', '{
+  "texts": {
+    "menuTitle": "Menu",
+    "categoriesTitle": "Categorias",
+    "categories": {
+      "entradas": "ENTRADAS",
+      "salgadas": "PIZZAS SALGADAS",
+      "doces": "PIZZAS DOCES",
+      "bebidas": "BEBIDAS"
+    }
+  },
+  "colors": {
+    "entradas": "orange-500",
+    "salgadas": "primary",
+    "doces": "accent",
+    "bebidas": "blue-500"
+  }
+}'),
+('s0000000-0000-0000-0000-000000000009', 'social', '{
+  "facebook": "https://facebook.com/bellamassa",
+  "instagram": "https://instagram.com/bellamassa"
 }')
 ON CONFLICT (id) DO NOTHING;
 

@@ -213,8 +213,33 @@ app.get('/api/public/settings', async (c) => {
     const settings = await db.select().from(pizzeriaSettings)
     const settingsObj: any = {}
     settings.forEach((s: any) => {
-      settingsObj[s.section] = s.data
+      // Map business_hours -> businessHours for frontend compatibility
+      const key = s.section === 'business_hours' ? 'businessHours' : s.section
+      settingsObj[key] = s.data
     })
+    
+    // Add default UI config if not present
+    if (!settingsObj.ui_config) {
+      settingsObj.ui_config = {
+        texts: {
+          menuTitle: "Menu",
+          categoriesTitle: "Categorias",
+          categories: {
+            entradas: "ENTRADAS",
+            salgadas: "PIZZAS SALGADAS",
+            doces: "PIZZAS DOCES",
+            bebidas: "BEBIDAS"
+          }
+        },
+        colors: {
+          entradas: "orange-500",
+          salgadas: "primary",
+          doces: "accent",
+          bebidas: "blue-500"
+        }
+      }
+    }
+    
     return c.json(settingsObj)
   } catch (error) {
     return c.json({}, 200)
@@ -550,23 +575,56 @@ app.put('/api/admin/settings', async (c) => {
   
   const dbSection = sectionMapping[section] || section
   
+  let finalData = data
+  
+  // 🗺️ Geocodificação automática para endereços
+  if (dbSection === 'address') {
+    const address = `${data.street}, ${data.number}, ${data.neighborhood}, ${data.city} - ${data.state}, ${data.cep}, Brasil`
+    const apiKey = c.env.GOOGLE_MAPS_API_KEY
+    
+    if (apiKey) {
+      try {
+        const geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${apiKey}`
+        const geocodeResponse = await fetch(geocodeUrl)
+        const geocodeData = await geocodeResponse.json()
+        
+        if (geocodeData.status === 'OK' && geocodeData.results[0]) {
+          const location = geocodeData.results[0].geometry.location
+          finalData = {
+            ...data,
+            coordinates: {
+              lat: location.lat,
+              lng: location.lng
+            }
+          }
+          console.log(`✅ Geocodificação bem-sucedida: ${location.lat}, ${location.lng}`)
+        } else {
+          console.warn(`⚠️ Geocodificação falhou (status: ${geocodeData.status}), mantendo coordenadas antigas`)
+        }
+      } catch (error) {
+        console.error('❌ Erro na geocodificação:', error)
+        // Continua sem coordenadas atualizadas em caso de erro
+      }
+    }
+  }
+  
   // Check if section exists
   const existing = await db.select().from(pizzeriaSettings).where(eq(pizzeriaSettings.section, dbSection))
   
   if (existing.length > 0) {
     // Update existing section
     await db.update(pizzeriaSettings)
-      .set({ data: data as any, updatedAt: new Date() })
+      .set({ data: finalData as any, updatedAt: new Date() })
       .where(eq(pizzeriaSettings.section, dbSection))
   } else {
     // Insert new section (for 'social' and other new sections)
     await db.insert(pizzeriaSettings).values({
       section: dbSection,
-      data: data as any
+      data: finalData as any
     })
   }
   
-  return c.json({ success: true, message: 'Configurações atualizadas' })
+  return c.json({ success: true, message: 'Configurações atualizadas', coordinates: finalData.coordinates || null })
 })
 
 app.post('/api/admin/bulk-import-flavors', async (c) => {

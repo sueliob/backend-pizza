@@ -9,6 +9,7 @@ export type Env = {
   CLOUDINARY_CLOUD_NAME?: string
   CLOUDINARY_API_KEY?: string
   CLOUDINARY_API_SECRET?: string
+  GOOGLE_MAPS_API_KEY?: string
 }
 
 const ACCESS_TTL = 60 * 15
