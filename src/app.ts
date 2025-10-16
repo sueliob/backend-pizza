@@ -167,7 +167,14 @@ app.get('/api/flavors', async (c) => {
   const db = c.get('db')
   try {
     const flavors = await db.select().from(pizzaFlavors).where(eq(pizzaFlavors.available, true))
-    return c.json(flavors)
+    
+    // Parse JSON fields (prices pode vir como string do PostgreSQL)
+    const parsedFlavors = flavors.map((flavor: any) => ({
+      ...flavor,
+      prices: typeof flavor.prices === 'string' ? JSON.parse(flavor.prices) : flavor.prices
+    }))
+    
+    return c.json(parsedFlavors)
   } catch (error) {
     console.error('Error fetching flavors:', error)
     return c.json([], 200)
@@ -180,7 +187,14 @@ app.get('/api/flavors/:category', async (c) => {
   try {
     const flavors = await db.select().from(pizzaFlavors)
       .where(and(eq(pizzaFlavors.category, category), eq(pizzaFlavors.available, true)))
-    return c.json(flavors)
+    
+    // Parse JSON fields (prices pode vir como string do PostgreSQL)
+    const parsedFlavors = flavors.map((flavor: any) => ({
+      ...flavor,
+      prices: typeof flavor.prices === 'string' ? JSON.parse(flavor.prices) : flavor.prices
+    }))
+    
+    return c.json(parsedFlavors)
   } catch (error) {
     console.error('Error fetching flavors by category:', error)
     return c.json([], 200)
@@ -589,7 +603,14 @@ app.get('/api/admin/dashboard', async (c) => {
 app.get('/api/admin/flavors', async (c) => {
   const db = c.get('db')
   const flavors = await db.select().from(pizzaFlavors)
-  return c.json(flavors)
+  
+  // Parse JSON fields (prices pode vir como string do PostgreSQL)
+  const parsedFlavors = flavors.map((flavor: any) => ({
+    ...flavor,
+    prices: typeof flavor.prices === 'string' ? JSON.parse(flavor.prices) : flavor.prices
+  }))
+  
+  return c.json(parsedFlavors)
 })
 
 app.post('/api/admin/flavors', async (c) => {
