@@ -132,10 +132,38 @@ INSERT INTO pizzeria_settings (id, section, data) VALUES
   }
 }'),
 ('s0000000-0000-0000-0000-000000000005', 'payment_methods', '{
-  "cash": true,
-  "credit_card": true,
-  "debit_card": true,
-  "pix": true
+  "pix": {
+    "enabled": true
+  },
+  "cash": {
+    "enabled": true
+  },
+  "credit": {
+    "enabled": true,
+    "brands": {
+      "visa": true,
+      "elo": true,
+      "mastercard": true,
+      "amex": true
+    }
+  },
+  "debit": {
+    "enabled": true,
+    "brands": {
+      "visa": true,
+      "elo": true,
+      "mastercard": true
+    }
+  },
+  "meal": {
+    "enabled": true,
+    "brands": {
+      "alelo": true,
+      "vr": true,
+      "ticket": true,
+      "sodexo": true
+    }
+  }
 }'),
 ('s0000000-0000-0000-0000-000000000006', 'categories', '{
   "salgadas": {
@@ -262,4 +290,49 @@ FROM admin_users;
 -- ✅ Cost 10 = bom equilíbrio segurança/performance
 -- ✅ ON CONFLICT DO NOTHING = pode rodar múltiplas vezes
 -- ✅ Hash computation no Postgres = 0 CPU no Worker
+-- ==============================================
+
+-- ==============================================
+-- CLOUD PRODUCTION DEPLOYMENT:
+-- ==============================================
+-- Este arquivo está adaptado para produção cloud:
+--
+-- 1. CONFIGURAÇÃO DE DOMÍNIOS:
+--    - Backend API: api.curiooso.com.br
+--    - Frontend: m.curiooso.com.br
+--
+-- 2. VARIÁVEIS DE AMBIENTE NECESSÁRIAS:
+--    - DATABASE_URL: Conexão Neon PostgreSQL
+--    - GOOGLE_MAPS_API_KEY: Para cálculo de entregas
+--    - JWT_SECRET: Chave para tokens JWT
+--
+-- 3. PAYMENT METHODS:
+--    - Sistema completo com marcas de cartão
+--    - Credit: Visa, Elo, Mastercard, American Express
+--    - Debit: Visa, Elo, Mastercard
+--    - Meal: Alelo, VR, Ticket, Sodexo
+--    - PIX e Dinheiro habilitados
+--
+-- 4. PREÇOS DINÂMICOS:
+--    - Entradas/Bebidas: Campo "unico" no prices
+--    - Pizzas Salgadas: Campos "grande" e "individual"
+--    - Pizzas Doces: Campos "media" e "individual"
+--
+-- 5. DELIVERY FEE CONFIGURÁVEL:
+--    - baseFee: Taxa mínima de entrega
+--    - feePerRange: Custo por faixa de distância
+--    - kmRange: Km por faixa (padrão: 3km)
+--    - baseTime: Tempo base de entrega (min)
+--
+-- 6. EXECUTAR NO NEON SQL EDITOR:
+--    a) Criar tabelas: npm run db:push
+--    b) Habilitar pgcrypto (linha 13)
+--    c) Executar este script completo
+--    d) Verificar resultado dos SELECTs
+--
+-- 7. APÓS DEPLOY:
+--    - Trocar senha do admin
+--    - Atualizar dados da pizzaria
+--    - Configurar formas de pagamento
+--    - Ajustar taxas de entrega
 -- ==============================================
