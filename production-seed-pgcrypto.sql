@@ -100,9 +100,7 @@ INSERT INTO pizzeria_settings (id, section, data) VALUES
 ('s0000000-0000-0000-0000-000000000002', 'contact', '{
   "phone": "(11) 98765-4321",
   "whatsapp": "5511987654321",
-  "email": "contato@bellamassa.com.br",
-  "instagram": "@bellamassa",
-  "facebook": "bellamassapizzaria"
+  "email": "contato@bellamassa.com.br"
 }'),
 ('s0000000-0000-0000-0000-000000000003', 'business_hours', '{
   "Segunda-feira": "Fechado",
