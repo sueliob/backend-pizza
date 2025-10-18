@@ -514,9 +514,17 @@ export class DatabaseStorage implements IStorage {
 
   async updateSetting(section: string, data: any): Promise<PizzeriaSetting | undefined> {
     try {
-      const [updatedSetting] = await db.update(pizzeriaSettings)
-        .set({ data })
-        .where(eq(pizzeriaSettings.section, section))
+      // Use UPSERT to insert if not exists, update if exists
+      const [updatedSetting] = await db
+        .insert(pizzeriaSettings)
+        .values({ section, data })
+        .onConflictDoUpdate({
+          target: pizzeriaSettings.section,
+          set: { 
+            data,
+            updatedAt: new Date()
+          }
+        })
         .returning();
       return updatedSetting;
     } catch (error) {

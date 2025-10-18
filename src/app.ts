@@ -8,6 +8,7 @@ import { type Env, signAccessToken, verifyAccessToken, genRefreshPair, sha256Hex
 import { verifyPasswordPgcrypto, hashPasswordPgcrypto } from './auth-pgcrypto'
 import { PIZZERIA_ADDRESS, DELIVERY_CONFIG, CEP_COORDINATES } from '../shared/constants'
 import { getCoordinatesFromAddress, calculateRoute } from './lib/google-maps'
+import { storage } from './storage'
 
 type Vars = { db: any, userId?: string, username?: string, role?: string }
 
@@ -704,7 +705,6 @@ app.get('/api/admin/settings', async (c) => {
 })
 
 app.put('/api/admin/settings', async (c) => {
-  const db = c.get('db')
   const { section, data } = await c.req.json()
   
   if (!section || !data) {
@@ -752,20 +752,11 @@ app.put('/api/admin/settings', async (c) => {
     }
   }
   
-  // Check if section exists
-  const existing = await db.select().from(pizzeriaSettings).where(eq(pizzeriaSettings.section, dbSection))
+  // Use storage.updateSetting() with UPSERT logic
+  const updated = await storage.updateSetting(dbSection, finalData)
   
-  if (existing.length > 0) {
-    // Update existing section
-    await db.update(pizzeriaSettings)
-      .set({ data: finalData as any, updatedAt: new Date() })
-      .where(eq(pizzeriaSettings.section, dbSection))
-  } else {
-    // Insert new section (for 'social' and other new sections)
-    await db.insert(pizzeriaSettings).values({
-      section: dbSection,
-      data: finalData as any
-    })
+  if (!updated) {
+    return c.json({ error: 'Erro ao atualizar configurações' }, 500)
   }
   
   return c.json({ success: true, message: 'Configurações atualizadas', coordinates: finalData.coordinates || null })
